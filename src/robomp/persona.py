@@ -9,9 +9,11 @@ side-effects.
 from __future__ import annotations
 
 import re
+import tomllib
+from collections.abc import Mapping
 from functools import cache
 from importlib import resources
-from typing import Any, Mapping
+from typing import Any
 
 from robomp.github_client import CommentInfo, IssueInfo, RepoInfo
 from robomp.sandbox import Workspace
@@ -41,6 +43,88 @@ def render(template: str, scope: Mapping[str, Any]) -> str:
 @cache
 def _load(name: str) -> str:
     return resources.files("robomp.prompts").joinpath(name).read_text(encoding="utf-8")
+
+
+@cache
+def _load_toml(name: str) -> Mapping[str, Any]:
+    data = tomllib.loads(_load(name))
+    if not isinstance(data, Mapping):
+        raise ValueError(f"prompt data file {name!r} must contain a TOML table")
+    return data
+
+
+def _require_mapping(value: Any, context: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{context} must be a table")
+    return value
+
+
+def _require_nonempty_str(value: Any, context: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{context} must be a non-empty string")
+    return value
+
+
+def seed_phases(task_kind: str) -> list[dict[str, Any]]:
+    raw_phases = _load_toml("todo_phases.toml").get(task_kind, [])
+    if not isinstance(raw_phases, list):
+        raise ValueError(f"todo_phases.toml[{task_kind!r}] must be a list of phases")
+
+    phases: list[dict[str, Any]] = []
+    for phase_index, raw_phase in enumerate(raw_phases):
+        phase = _require_mapping(raw_phase, f"todo_phases.toml[{task_kind!r}][{phase_index}]")
+        name = _require_nonempty_str(
+            phase.get("name"),
+            f"todo_phases.toml[{task_kind!r}][{phase_index}].name",
+        )
+        raw_tasks = phase.get("tasks")
+        if not isinstance(raw_tasks, list) or not raw_tasks:
+            raise ValueError(f"todo_phases.toml[{task_kind!r}][{phase_index}].tasks must be a non-empty list")
+        tasks = [
+            _require_nonempty_str(
+                task,
+                f"todo_phases.toml[{task_kind!r}][{phase_index}].tasks[{task_index}]",
+            )
+            for task_index, task in enumerate(raw_tasks)
+        ]
+        phases.append({"name": name, "tasks": tasks})
+    return phases
+
+
+def _host_tool_entry(tool_name: str) -> Mapping[str, Any]:
+    return _require_mapping(
+        _load_toml("host_tools.toml").get(tool_name),
+        f"host_tools.toml[{tool_name!r}]",
+    )
+
+
+def host_tool_description(tool_name: str) -> str:
+    return _require_nonempty_str(
+        _host_tool_entry(tool_name).get("description"),
+        f"host_tools.toml[{tool_name!r}].description",
+    )
+
+
+def host_tool_parameter_description(tool_name: str, parameter_name: str) -> str:
+    parameters = _require_mapping(
+        _host_tool_entry(tool_name).get("parameters"),
+        f"host_tools.toml[{tool_name!r}].parameters",
+    )
+    return _require_nonempty_str(
+        parameters.get(parameter_name),
+        f"host_tools.toml[{tool_name!r}].parameters[{parameter_name!r}]",
+    )
+
+
+def classify_next_step(primary: str) -> str:
+    steps = _require_mapping(
+        _host_tool_entry("classify_issue").get("next_steps"),
+        "host_tools.toml['classify_issue'].next_steps",
+    )
+    return _require_nonempty_str(
+        steps.get(primary),
+        f"host_tools.toml['classify_issue'].next_steps[{primary!r}]",
+    )
 
 
 def system_append(*, repo: RepoInfo, issue: IssueInfo, workspace: Workspace) -> str:
@@ -96,11 +180,33 @@ def followup_review(
         },
     )
 
+def unable_to_reproduce_comment(*, diagnosis: str, info_needed: str) -> str:
+    return render(
+        _load("unable_to_reproduce_comment.md"),
+        {"diagnosis": diagnosis, "info_needed": info_needed},
+    )
+
+
+def finalized_issue_comment() -> str:
+    return _load("finalized_issue_comment.md").strip()
+
+
+def finalized_pr_comment() -> str:
+    return _load("finalized_pr_comment.md").strip()
+
+
 
 __all__ = [
+    "classify_next_step",
+    "finalized_issue_comment",
+    "finalized_pr_comment",
     "followup_comment",
     "followup_review",
+    "host_tool_description",
+    "host_tool_parameter_description",
     "kickoff",
     "render",
+    "seed_phases",
     "system_append",
+    "unable_to_reproduce_comment",
 ]

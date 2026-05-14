@@ -6,6 +6,8 @@ import logging
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+
+from robomp import persona
 from robomp.config import Settings
 from robomp.db import Database, IssueRow, IssueState, issue_key
 from robomp.github_client import (
@@ -121,7 +123,7 @@ async def handle_comment(
         try:
             await github.post_comment(
                 repo.full_name, issue.number,
-                "This issue is closed. If the bug is back, please reopen and I'll triage again from scratch.",
+                persona.finalized_issue_comment(),
             )
         except GitHubError as exc:
             log.warning("ack comment failed", extra={"err": str(exc)})
@@ -254,8 +256,7 @@ async def handle_pr_conversation(
         try:
             await github.post_comment(
                 repo_full, pr_number,
-                "This PR has been closed/merged — opening a fresh fix for further changes is recommended. "
-                "If this is a regression, reopen the original issue and I'll triage from scratch.",
+                persona.finalized_pr_comment(),
             )
         except GitHubError as exc:
             log.warning("ack comment failed", extra={"err": str(exc)})

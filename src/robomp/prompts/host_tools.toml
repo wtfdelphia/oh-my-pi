@@ -1,0 +1,60 @@
+[gh_post_comment]
+description = "Post a comment on the originating issue or PR thread."
+
+[gh_post_comment.parameters]
+body = "Markdown body of the comment."
+number = "Optional issue/PR number. Defaults to the originating issue."
+
+[gh_push_branch]
+description = "Push the workspace branch to origin. Uses credentials configured by the orchestrator."
+
+[gh_push_branch.parameters]
+branch = "Optional explicit branch name; defaults to the workspace branch."
+
+[gh_open_pr]
+description = "Open a pull request from the workspace branch using the PR body template."
+
+[gh_open_pr.parameters]
+body = "Markdown body. MUST include the four template sections in order: `## Repro`, `## Cause`, `## Fix`, `## Verification`."
+base = "Override the base branch (default: repo default)."
+
+[gh_request_review]
+description = "Request reviewers and/or add assignees on the open PR."
+
+[repro_record]
+description = "Persist a reproduction transcript (command, output, exit code) for the issue."
+
+[repro_record.parameters]
+reproduced = "True when the recorded run demonstrates the bug."
+
+[mark_unable_to_reproduce]
+description = "Close the loop without a PR: comment with diagnosis + info request, mark issue abandoned."
+
+[fetch_issue_thread]
+description = "Refetch the originating issue and its comments (use sparingly)."
+
+[set_issue_labels]
+description = "Append labels to the originating issue/PR. Never removes existing labels."
+
+[set_issue_labels.parameters]
+number = "Optional override; defaults to the originating issue."
+
+[classify_issue]
+description = "First triage step. Classify the issue, apply labels on GitHub, and pick the workflow branch (bug → repro+fix+PR, question → reply only, etc.). MUST be called before any other gh_* action on a new issue."
+
+[classify_issue.parameters]
+primary = "Exactly one primary classification."
+priority = "Required when primary=='bug'; one of prio:p0..p3."
+functional = "Zero or more functional labels."
+provider = "Only if explicitly provider-scoped; format provider:<name>."
+platform = "Only if platform materially affects reproduction."
+rationale = "One sentence explaining the classification."
+
+[classify_issue.next_steps]
+bug = "reproduce → diagnose → fix → PR"
+documentation = "fix the docs and open a PR using the four-section template"
+question = "answer in a single gh_post_comment; no PR, no repro"
+enhancement = "post one thoughtful gh_post_comment on feasibility/scope; no PR"
+proposal = "post one thoughtful gh_post_comment on feasibility/scope; no PR"
+invalid = "post one explanatory gh_post_comment; no further action"
+duplicate = "post one explanatory gh_post_comment; no further action"

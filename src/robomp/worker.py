@@ -53,23 +53,6 @@ def _build_extra_env(settings: Settings) -> dict[str, str]:
     return env
 
 
-def _seed_phases(task_kind: str) -> list[dict[str, Any]]:
-    if task_kind == "triage_issue":
-        return [
-            {"name": "Classify", "tasks": [
-                "Read the issue + any prior comments",
-                "Call classify_issue with primary type + labels",
-            ]},
-            {"name": "Respond", "tasks": [
-                "Branch on the classification (see system prompt)",
-                "Bug: reproduce, fix, PR. Question/proposal/etc: one comment, stop.",
-            ]},
-        ]
-    if task_kind == "handle_comment":
-        return [{"name": "Follow up", "tasks": ["Read new comment", "Decide action", "Apply and reply"]}]
-    if task_kind == "handle_review":
-        return [{"name": "Review response", "tasks": ["Read review comment", "Address change", "Push and reply"]}]
-    return []
 
 
 def _build_prompt(task_kind: str, inputs: TaskInputs, *, comment: CommentInfo | None,
@@ -184,7 +167,7 @@ def _run_rpc_blocking(
         client.on_tool_execution_end(_on_tool_end)
         client.on_message_update(_on_msg)
 
-        phases = _seed_phases(task_kind)
+        phases = persona.seed_phases(task_kind)
         if phases:
             try:
                 if task_kind == "triage_issue":

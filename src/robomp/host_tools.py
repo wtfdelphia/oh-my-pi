@@ -18,6 +18,8 @@ from typing import Any, Mapping
 
 from omp_rpc import HostTool, HostToolContext, RpcCommandError, host_tool
 
+from robomp import persona
+
 from robomp.db import Database, issue_key
 from robomp.github_client import GitHubClient, GitHubError, IssueInfo, RepoInfo
 from robomp.sandbox import Workspace
@@ -86,14 +88,14 @@ def _build_post_comment(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="gh_post_comment",
-        description="Post a comment on the originating issue or PR thread.",
+        description=persona.host_tool_description("gh_post_comment"),
         parameters={
             "type": "object",
             "properties": {
-                "body": {"type": "string", "description": "Markdown body of the comment."},
+                "body": {"type": "string", "description": persona.host_tool_parameter_description("gh_post_comment", "body")},
                 "number": {
                     "type": "integer",
-                    "description": "Optional issue/PR number. Defaults to the originating issue.",
+                    "description": persona.host_tool_parameter_description("gh_post_comment", "number"),
                 },
             },
             "required": ["body"],
@@ -139,6 +141,11 @@ def _build_push_branch(bindings: ToolBindings) -> HostTool[Any, Any]:
             ["git", "log", "--format=%H%x09%ae%x09%an", f"origin/{base}..HEAD"],
             cwd=repo_dir, capture_output=True, text=True, check=False,
         )
+        if identities.returncode != 0:
+            err = (identities.stderr or identities.stdout).strip()
+            msg = f"refusing to push: could not inspect commit authors for origin/{base}..HEAD: {err}"
+            _audit(bindings, "gh_push_branch", args, error=msg)
+            _raise_command(msg)
         offending: list[str] = []
         for line in (identities.stdout or "").strip().splitlines():
             parts = line.split("\t")
@@ -178,39 +185,6 @@ def _build_push_branch(bindings: ToolBindings) -> HostTool[Any, Any]:
             _audit(bindings, "gh_push_branch", args, error=msg)
             _raise_command(msg)
 
-        # Lint/format gate. Best-effort: run the project's `fix` script (typically
-        # `bun run fix:tools` → biome). If the script exists, succeeds, AND
-        # produces changes, the commits aren't formatted — refuse so the agent
-        # amends them. If the script isn't available, we silently proceed (other
-        # repos may not define it).
-        if (bindings.workspace.repo_dir / "package.json").exists():
-            for script in ("fix:tools", "fix"):
-                proc_fix = subprocess.run(
-                    ["bun", "run", "--silent", script],
-                    cwd=repo_dir, capture_output=True, text=True, check=False,
-                    timeout=180,
-                )
-                if proc_fix.returncode != 0:
-                    # Script not defined / bun missing / install missing — try next or skip.
-                    continue
-                status2 = subprocess.run(
-                    ["git", "status", "--porcelain"],
-                    cwd=repo_dir, capture_output=True, text=True, check=False,
-                )
-                if status2.stdout.strip():
-                    dirty = "\n  ".join(status2.stdout.strip().splitlines())
-                    msg = (
-                        f"refusing to push: `bun run {script}` produced unformatted-file "
-                        "changes that aren't in any commit. The commit history won't pass "
-                        f"CI as-is. Diff:\n  {dirty}\n"
-                        "Amend the offending commit(s) with the formatter output: "
-                        "`git add -A && git commit --amend --no-edit --reset-author`."
-                    )
-                    _audit(bindings, "gh_push_branch", args, error=msg)
-                    _raise_command(msg)
-                break  # successful and clean — done
-
-
         proc = subprocess.run(
             ["git", "push", "--set-upstream", "origin", branch],
             cwd=repo_dir, capture_output=True, text=True, check=False,
@@ -227,13 +201,13 @@ def _build_push_branch(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="gh_push_branch",
-        description="Push the workspace branch to origin. Uses credentials configured by the orchestrator.",
+        description=persona.host_tool_description("gh_push_branch"),
         parameters={
             "type": "object",
             "properties": {
                 "branch": {
                     "type": "string",
-                    "description": "Optional explicit branch name; defaults to the workspace branch.",
+                    "description": persona.host_tool_parameter_description("gh_push_branch", "branch"),
                 },
             },
             "additionalProperties": False,
@@ -316,19 +290,16 @@ def _build_open_pr(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="gh_open_pr",
-        description="Open a pull request from the workspace branch using the PR body template.",
+        description=persona.host_tool_description("gh_open_pr"),
         parameters={
             "type": "object",
             "properties": {
                 "title": {"type": "string"},
                 "body": {
                     "type": "string",
-                    "description": (
-                        "Markdown body. MUST include the four template sections in order: "
-                        "`## Repro`, `## Cause`, `## Fix`, `## Verification`."
-                    ),
+                    "description": persona.host_tool_parameter_description("gh_open_pr", "body"),
                 },
-                "base": {"type": "string", "description": "Override the base branch (default: repo default)."},
+                "base": {"type": "string", "description": persona.host_tool_parameter_description("gh_open_pr", "base")},
                 "draft": {"type": "boolean", "default": False},
             },
             "required": ["title", "body"],
@@ -376,7 +347,7 @@ def _build_request_review(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="gh_request_review",
-        description="Request reviewers and/or add assignees on the open PR.",
+        description=persona.host_tool_description("gh_request_review"),
         parameters={
             "type": "object",
             "properties": {
@@ -421,7 +392,7 @@ def _build_repro_record(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="repro_record",
-        description="Persist a reproduction transcript (command, output, exit code) for the issue.",
+        description=persona.host_tool_description("repro_record"),
         parameters={
             "type": "object",
             "properties": {
@@ -429,7 +400,7 @@ def _build_repro_record(bindings: ToolBindings) -> HostTool[Any, Any]:
                 "command": {"type": "string"},
                 "output": {"type": "string"},
                 "exit_code": {"type": "integer"},
-                "reproduced": {"type": "boolean", "description": "True when the recorded run demonstrates the bug."},
+                "reproduced": {"type": "boolean", "description": persona.host_tool_parameter_description("repro_record", "reproduced")},
             },
             "required": ["title", "command", "output", "exit_code"],
             "additionalProperties": False,
@@ -447,11 +418,9 @@ def _build_mark_unable(bindings: ToolBindings) -> HostTool[Any, Any]:
             _raise_command("mark_unable_to_reproduce requires a 'diagnosis'.")
         if not isinstance(needed, str) or not needed.strip():
             _raise_command("mark_unable_to_reproduce requires 'info_needed' explaining what to ask for.")
-        body = (
-            "## Could not reproduce\n\n"
-            f"{diagnosis}\n\n"
-            "## Information needed\n\n"
-            f"{needed}\n"
+        body = persona.unable_to_reproduce_comment(
+            diagnosis=diagnosis,
+            info_needed=needed,
         )
         try:
             comment = _run_coro(
@@ -467,7 +436,7 @@ def _build_mark_unable(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="mark_unable_to_reproduce",
-        description="Close the loop without a PR: comment with diagnosis + info request, mark issue abandoned.",
+        description=persona.host_tool_description("mark_unable_to_reproduce"),
         parameters={
             "type": "object",
             "properties": {
@@ -515,7 +484,7 @@ def _build_fetch_thread(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="fetch_issue_thread",
-        description="Refetch the originating issue and its comments (use sparingly).",
+        description=persona.host_tool_description("fetch_issue_thread"),
         parameters={
             "type": "object",
             "properties": {},
@@ -556,12 +525,12 @@ def _build_set_issue_labels(bindings: ToolBindings) -> HostTool[Any, Any]:
 
     return host_tool(
         name="set_issue_labels",
-        description="Append labels to the originating issue/PR. Never removes existing labels.",
+        description=persona.host_tool_description("set_issue_labels"),
         parameters={
             "type": "object",
             "properties": {
                 "labels": {"type": "array", "items": {"type": "string"}},
-                "number": {"type": "integer", "description": "Optional override; defaults to the originating issue."},
+                "number": {"type": "integer", "description": persona.host_tool_parameter_description("set_issue_labels", "number")},
             },
             "required": ["labels"],
             "additionalProperties": False,
@@ -629,53 +598,40 @@ def _build_classify_issue(bindings: ToolBindings) -> HostTool[Any, Any]:
         )
         # Echo back the workflow the agent should now follow. The persona prompt
         # already describes each branch; the tool result reminds it.
-        if primary == "bug":
-            next_step = "reproduce → diagnose → fix → PR"
-        elif primary == "documentation":
-            next_step = "fix the docs and open a PR using the four-section template"
-        elif primary == "question":
-            next_step = "answer in a single gh_post_comment; no PR, no repro"
-        elif primary in ("enhancement", "proposal"):
-            next_step = "post one thoughtful gh_post_comment on feasibility/scope; no PR"
-        else:
-            next_step = "post one explanatory gh_post_comment; no further action"
+        next_step = persona.classify_next_step(str(primary))
         return f"classified as {primary}; labels applied: {', '.join(applied)}. Next: {next_step}."
 
     return host_tool(
         name="classify_issue",
-        description=(
-            "First triage step. Classify the issue, apply labels on GitHub, and pick the "
-            "workflow branch (bug → repro+fix+PR, question → reply only, etc.). MUST be "
-            "called before any other gh_* action on a new issue."
-        ),
+        description=persona.host_tool_description("classify_issue"),
         parameters={
             "type": "object",
             "properties": {
                 "primary": {
                     "type": "string",
                     "enum": list(_PRIMARY_TYPES),
-                    "description": "Exactly one primary classification.",
+                    "description": persona.host_tool_parameter_description("classify_issue", "primary"),
                 },
                 "priority": {
                     "type": "string",
                     "enum": list(_PRIORITIES),
-                    "description": "Required when primary=='bug'; one of prio:p0..p3.",
+                    "description": persona.host_tool_parameter_description("classify_issue", "priority"),
                 },
                 "functional": {
                     "type": "array",
                     "items": {"type": "string", "enum": list(_FUNCTIONAL)},
-                    "description": "Zero or more functional labels.",
+                    "description": persona.host_tool_parameter_description("classify_issue", "functional"),
                 },
                 "provider": {
                     "type": "string",
-                    "description": "Only if explicitly provider-scoped; format provider:<name>.",
+                    "description": persona.host_tool_parameter_description("classify_issue", "provider"),
                 },
                 "platform": {
                     "type": "string",
                     "enum": list(_PLATFORMS),
-                    "description": "Only if platform materially affects reproduction.",
+                    "description": persona.host_tool_parameter_description("classify_issue", "platform"),
                 },
-                "rationale": {"type": "string", "description": "One sentence explaining the classification."},
+                "rationale": {"type": "string", "description": persona.host_tool_parameter_description("classify_issue", "rationale")},
             },
             "required": ["primary", "rationale"],
             "additionalProperties": False,
