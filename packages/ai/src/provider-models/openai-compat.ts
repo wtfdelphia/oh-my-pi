@@ -2487,6 +2487,55 @@ const OPENCODE_GO_API_RESOLUTION = createOpenCodeApiResolution("https://opencode
 	"qwen3.5-plus": "openai-completions",
 	"qwen3.6-plus": "openai-completions",
 });
+type MiniMaxCodingPlanProvider = "minimax-code" | "minimax-code-cn";
+
+const MINIMAX_CODING_PLAN_M3 = {
+	id: "MiniMax-M3",
+	name: "MiniMax-M3",
+	contextWindow: 1_000_000,
+	maxTokens: 131_072,
+	input: ["text", "image"],
+} as const satisfies Pick<Model<"openai-completions">, "id" | "name" | "contextWindow" | "maxTokens" | "input">;
+
+const MINIMAX_CODING_PLAN_COMPAT = {
+	supportsStore: false,
+	supportsDeveloperRole: false,
+	supportsReasoningEffort: false,
+	reasoningContentField: "reasoning_content",
+} as const satisfies Model<"openai-completions">["compat"];
+
+function createMiniMaxCodingPlanModel(
+	provider: MiniMaxCodingPlanProvider,
+	baseUrl: string,
+): Model<"openai-completions"> {
+	return {
+		id: MINIMAX_CODING_PLAN_M3.id,
+		name: MINIMAX_CODING_PLAN_M3.name,
+		api: "openai-completions",
+		provider,
+		baseUrl,
+		reasoning: true,
+		input: [...MINIMAX_CODING_PLAN_M3.input],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: MINIMAX_CODING_PLAN_M3.contextWindow,
+		maxTokens: MINIMAX_CODING_PLAN_M3.maxTokens,
+		compat: { ...MINIMAX_CODING_PLAN_COMPAT },
+	};
+}
+
+/**
+ * Builds the MiniMax Coding Plan static model seed documented by MiniMax.
+ *
+ * models.dev does not currently expose `minimax-code` or `minimax-code-cn`, so
+ * generation must seed the subscription-plan headline model instead of relying
+ * on the previous `models.json` snapshot to carry it forever.
+ */
+export function buildMiniMaxCodingPlanStaticSeed(): Model<"openai-completions">[] {
+	return [
+		createMiniMaxCodingPlanModel("minimax-code", "https://api.minimax.io/v1"),
+		createMiniMaxCodingPlanModel("minimax-code-cn", "https://api.minimaxi.com/v1"),
+	];
+}
 
 const COPILOT_BASE_URL = "https://api.githubcopilot.com";
 
